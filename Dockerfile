@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
 
 WORKDIR /app
 
@@ -18,9 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # RunPod SDK
 RUN pip install --no-cache-dir runpod
 
-# ★ 모델 weights를 빌드 시점에 다운로드 (cold start 단축)
-# 모델 weight bake
-RUN pip install --no-cache-dir huggingface_hub
+# 모델 weights를 빌드 시점에 다운로드 (cold start 단축)
 RUN huggingface-cli download layerdifforg/seethroughv0.0.2_layerdiff3d
 RUN huggingface-cli download 24yearsold/seethroughv0.0.1_marigold
 
