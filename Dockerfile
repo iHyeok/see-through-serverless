@@ -1,9 +1,17 @@
 FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
 
+ENV PYTHONUNBUFFERED=1
+
+# 모드 설정: pod(개발/테스트) 또는 serverless(프로덕션)
+ARG MODE_TO_RUN=pod
+ENV MODE_TO_RUN=$MODE_TO_RUN
+
 WORKDIR /app
 
 # 시스템 패키지
-RUN apt-get update && apt-get install -y git wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    git wget openssh-server \
+    && rm -rf /var/lib/apt/lists/*
 
 # see-through 레포 클론
 RUN git clone https://github.com/shitagaki-lab/see-through.git
@@ -18,12 +26,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # RunPod SDK
 RUN pip install --no-cache-dir runpod
 
-# 모델 weights를 빌드 시점에 다운로드 (cold start 단축)
+# 모델 weights bake (cold start 단축)
 RUN huggingface-cli download layerdifforg/seethroughv0.0.2_layerdiff3d
 RUN huggingface-cli download 24yearsold/seethroughv0.0.1_marigold
 
-# handler 복사
-COPY handler.py /app/handler.py
-
+# handler, start.sh 복사
 WORKDIR /app
-CMD ["python", "-u", "handler.py"]
+COPY handler.py /app/handler.py
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]
