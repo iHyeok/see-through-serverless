@@ -9,7 +9,7 @@ WORKDIR /app
 
 # 시스템 패키지
 RUN apt-get update && apt-get install -y \
-    git wget openssh-server \
+    git wget openssh-server libgl1-mesa-glx libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # see-through 레포 클론
