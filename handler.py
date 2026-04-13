@@ -5,6 +5,13 @@ import subprocess
 import glob
 import json
 
+# Network Volume의 HuggingFace 캐시 경로 설정
+# Serverless: /runpod-volume, Pod: /workspace
+if os.path.exists("/runpod-volume/.cache/huggingface"):
+    os.environ["HF_HOME"] = "/runpod-volume/.cache/huggingface"
+elif os.path.exists("/workspace/.cache/huggingface"):
+    os.environ["HF_HOME"] = "/workspace/.cache/huggingface"
+
 SEETHROUGH_DIR = "/app/see-through"
 OUTPUT_DIR = os.path.join(SEETHROUGH_DIR, "workspace/layerdiff_output/")
 
@@ -31,12 +38,14 @@ def handler(job):
         os.remove(old_file)
 
     # 4) inference_psd.py 실행
+    env = os.environ.copy()
     result = subprocess.run(
         ["python", "inference/scripts/inference_psd.py",
          "--srcp", input_path,
          "--save_to_psd"],
         capture_output=True, text=True,
-        cwd=SEETHROUGH_DIR
+        cwd=SEETHROUGH_DIR,
+        env=env
     )
 
     if result.returncode != 0:
@@ -49,7 +58,6 @@ def handler(job):
     ]
 
     if not psd_files:
-        # depth만 있으면 그거라도 반환
         psd_files = glob.glob(os.path.join(OUTPUT_DIR, "*.psd"))
 
     if not psd_files:
@@ -75,6 +83,7 @@ def handler(job):
 if mode_to_run == "pod":
     # --- Pod 모드: 로컬 테스트 ---
     print("Running in Pod mode (local test)")
+    print(f"HF_HOME: {os.environ.get('HF_HOME', 'not set')}")
 
     test_image = os.path.join(SEETHROUGH_DIR, "assets/test_image.png")
     if not os.path.exists(test_image):
@@ -87,7 +96,6 @@ if mode_to_run == "pod":
     fake_job = {"input": {"image_base64": img_b64}}
     result = handler(fake_job)
 
-    # 결과 출력 (base64는 앞부분만)
     display = dict(result)
     if "psd_base64" in display:
         display["psd_base64"] = display["psd_base64"][:100] + "...(truncated)"
@@ -97,4 +105,5 @@ else:
     # --- Serverless 모드 ---
     import runpod
     print("Running in Serverless mode")
+    print(f"HF_HOME: {os.environ.get('HF_HOME', 'not set')}")
     runpod.serverless.start({"handler": handler})

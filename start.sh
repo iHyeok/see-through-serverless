@@ -3,6 +3,7 @@ set -e
 
 echo "=== See-through Serverless Worker ==="
 echo "MODE_TO_RUN: $MODE_TO_RUN"
+echo "HF_HOME: $HF_HOME"
 
 # SSH 설정 (Pod 모드에서 접속용)
 setup_ssh() {

@@ -6,6 +6,9 @@ ENV PYTHONUNBUFFERED=1
 ARG MODE_TO_RUN=pod
 ENV MODE_TO_RUN=$MODE_TO_RUN
 
+# Network Volume의 HuggingFace 캐시를 사용
+ENV HF_HOME=/runpod-volume/.cache/huggingface
+
 WORKDIR /app
 
 # 시스템 패키지
@@ -26,9 +29,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # RunPod SDK
 RUN pip install --no-cache-dir runpod
 
-# 모델 weights bake (cold start 단축)
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('layerdifforg/seethroughv0.0.2_layerdiff3d')"
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('24yearsold/seethroughv0.0.1_marigold')"
+# ★ 모델은 Network Volume에서 로드 (bake 불필요)
+# /runpod-volume/.cache/huggingface/hub/ 에 이미 다운로드되어 있음
 
 # handler, start.sh 복사
 WORKDIR /app
