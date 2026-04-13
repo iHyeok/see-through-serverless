@@ -1,13 +1,9 @@
-FROM pytorch/pytorch:2.8.0-cuda12.4-cudnn9-devel
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
 
 ENV PYTHONUNBUFFERED=1
 
-# 모드 설정: pod(개발/테스트) 또는 serverless(프로덕션)
 ARG MODE_TO_RUN=pod
 ENV MODE_TO_RUN=$MODE_TO_RUN
-
-# Network Volume의 HuggingFace 캐시를 사용
-ENV HF_HOME=/runpod-volume/.cache/huggingface
 
 WORKDIR /app
 
@@ -29,8 +25,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # RunPod SDK
 RUN pip install --no-cache-dir runpod
 
-# ★ 모델은 Network Volume에서 로드 (bake 불필요)
-# /runpod-volume/.cache/huggingface/hub/ 에 이미 다운로드되어 있음
+# 모델 weights bake
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('layerdifforg/seethroughv0.0.2_layerdiff3d')"
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('24yearsold/seethroughv0.0.1_marigold')"
 
 # handler, start.sh 복사
 WORKDIR /app
