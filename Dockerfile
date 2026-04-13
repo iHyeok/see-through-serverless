@@ -27,8 +27,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir runpod
 
 # 모델 weights bake (cold start 단축)
-RUN python -m huggingface_hub.cli.main download layerdifforg/seethroughv0.0.2_layerdiff3d
-RUN python -m huggingface_hub.cli.main download 24yearsold/seethroughv0.0.1_marigold
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('layerdifforg/seethroughv0.0.2_layerdiff3d')"
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('24yearsold/seethroughv0.0.1_marigold')"
 
 # handler, start.sh 복사
 WORKDIR /app
