@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
+FROM pytorch/pytorch:2.8.0-cuda12.4-cudnn9-devel
 
 ENV PYTHONUNBUFFERED=1
 
@@ -22,11 +22,11 @@ RUN ln -sf common/assets assets
 # 의존성 설치
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 의존성 설치 후, 아래 줄 추가
-RUN sed -i "s/add_argument('--resolution', default=1280/add_argument('--resolution', type=int, default=1280/" inference/scripts/inference_psd.py
+# RunPod SDK + R2(S3) 업로드용
+RUN pip install --no-cache-dir runpod boto3
 
-# RunPod SDK
-RUN pip install --no-cache-dir runpod
+# 원본 코드 argparse 버그 수정 (resolution에 type=int 누락)
+RUN sed -i "s/add_argument('--resolution', default=1280/add_argument('--resolution', type=int, default=1280/" inference/scripts/inference_psd.py
 
 # 모델 weights bake
 RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('layerdifforg/seethroughv0.0.2_layerdiff3d')"

@@ -6,6 +6,7 @@ see-through-serverless 테스트 스크립트
   python test_script.py --image my_image.png     # 이미지 지정
   python test_script.py --resolution 1536        # 해상도 변경
   python test_script.py --include_layers         # 분할 이미지 zip도 받기
+  python test_script.py --download               # 결과 파일 자동 다운로드
 """
 
 import argparse
@@ -13,6 +14,24 @@ import requests
 import base64
 import time
 import os
+
+
+def download_file(url, output_dir, filename=None):
+    """URL에서 파일 다운로드"""
+    if not filename:
+        filename = url.split("/")[-1]
+    filepath = os.path.join(output_dir, filename)
+
+    res = requests.get(url, stream=True)
+    res.raise_for_status()
+
+    with open(filepath, "wb") as f:
+        for chunk in res.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    size_kb = os.path.getsize(filepath) // 1024
+    print(f"  Downloaded: {filepath} ({size_kb} KB)")
+    return filepath
 
 
 def main():
@@ -26,7 +45,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="랜덤 시드 (기본: 42)")
     parser.add_argument("--no_tblr_split", action="store_true", help="좌우 분리 비활성화")
     parser.add_argument("--include_layers", action="store_true", help="분할 이미지 zip 포함")
-    parser.add_argument("--output_dir", type=str, default=".", help="결과 저장 경로 (기본: 현재 디렉토리)")
+    parser.add_argument("--download", action="store_true", help="결과 파일 자동 다운로드")
+    parser.add_argument("--output_dir", type=str, default=".", help="다운로드 저장 경로 (기본: 현재 디렉토리)")
     parser.add_argument("--poll_interval", type=int, default=10, help="폴링 간격 초 (기본: 10)")
     args = parser.parse_args()
 
@@ -101,30 +121,32 @@ def main():
         print(f"[{elapsed:.0f}s] Status: {current_status}")
 
         if current_status == "COMPLETED":
-            output = status_res["output"]
+            output = status_res.get("output", {})
 
-            # PSD 저장
-            os.makedirs(args.output_dir, exist_ok=True)
-            psd_filename = output.get("filename", "result.psd")
-            psd_path = os.path.join(args.output_dir, psd_filename)
+            if not output:
+                print("\nError: No output in response")
+                print("Full response:", json.dumps(status_res, indent=2))
+                break
 
-            psd_data = base64.b64decode(output["psd_base64"])
-            with open(psd_path, "wb") as f:
-                f.write(psd_data)
-            print(f"\nPSD saved: {psd_path} ({len(psd_data) // 1024} KB)")
+            print(f"\n--- Results ---")
+            print(f"PSD: {output.get('psd_url', 'N/A')}")
+            print(f"Filename: {output.get('filename', 'N/A')}")
 
-            # 레이어 zip 저장
-            if "layers_zip_base64" in output:
-                zip_filename = output.get("layers_zip_filename", "layers.zip")
-                zip_path = os.path.join(args.output_dir, zip_filename)
-
-                zip_data = base64.b64decode(output["layers_zip_base64"])
-                with open(zip_path, "wb") as f:
-                    f.write(zip_data)
-                print(f"Layers ZIP saved: {zip_path} ({len(zip_data) // 1024} KB)")
-
+            if "layers_zip_url" in output:
+                print(f"Layers ZIP: {output['layers_zip_url']}")
             if "layers_zip_error" in output:
-                print(f"Layers ZIP error: {output['layers_zip_error']}")
+                print(f"Layers ZIP Error: {output['layers_zip_error']}")
+
+            # 다운로드
+            if args.download:
+                os.makedirs(args.output_dir, exist_ok=True)
+                print(f"\nDownloading to {args.output_dir}/")
+
+                if "psd_url" in output:
+                    download_file(output["psd_url"], args.output_dir, output.get("filename"))
+
+                if "layers_zip_url" in output:
+                    download_file(output["layers_zip_url"], args.output_dir, output.get("layers_zip_filename"))
 
             print(f"\nTotal time: {elapsed:.1f}s")
             break
@@ -137,4 +159,5 @@ def main():
 
 
 if __name__ == "__main__":
+    import json
     main()

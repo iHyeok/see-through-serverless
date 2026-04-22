@@ -5,6 +5,8 @@ import subprocess
 import glob
 import json
 import shutil
+import uuid
+import boto3
 
 # Network Volume의 HuggingFace 캐시 경로 설정
 if os.path.exists("/runpod-volume/.cache/huggingface"):
@@ -16,6 +18,47 @@ SEETHROUGH_DIR = "/app/see-through"
 OUTPUT_DIR = os.path.join(SEETHROUGH_DIR, "workspace/layerdiff_output/")
 
 mode_to_run = os.getenv("MODE_TO_RUN", "pod")
+
+# R2 설정
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL", "")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "")
+R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "")  # https://pub-xxx.r2.dev
+
+
+def get_s3_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=R2_ENDPOINT_URL,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+    )
+
+
+def upload_to_r2(local_path, r2_key):
+    """파일을 R2에 업로드하고 공개 URL을 반환"""
+    s3 = get_s3_client()
+
+    # Content-Type 설정
+    ext = os.path.splitext(local_path)[1].lower()
+    content_types = {
+        ".psd": "application/octet-stream",
+        ".zip": "application/zip",
+        ".png": "image/png",
+    }
+    content_type = content_types.get(ext, "application/octet-stream")
+
+    s3.upload_file(
+        local_path,
+        R2_BUCKET_NAME,
+        r2_key,
+        ExtraArgs={"ContentType": content_type},
+    )
+
+    # 공개 URL
+    public_url = f"{R2_PUBLIC_URL.rstrip('/')}/{r2_key}"
+    return public_url
 
 
 def handler(job):
@@ -32,7 +75,7 @@ def handler(job):
     inference_steps = job_input.get("inference_steps", 30)
     seed = job_input.get("seed", 42)
     tblr_split = job_input.get("tblr_split", True)
-    include_layers = job_input.get("include_layers", False)  # 분할 이미지 zip 포함 여부
+    include_layers = job_input.get("include_layers", False)
 
     # 2) 임시 파일로 저장
     input_path = "/tmp/input_image.png"
@@ -81,34 +124,40 @@ def handler(job):
     if not psd_files:
         return {"error": "No PSD output found", "stdout": result.stdout[-500:]}
 
-    # 6) PSD를 base64로
     psd_path = psd_files[0]
-    with open(psd_path, "rb") as f:
-        psd_b64 = base64.b64encode(f.read()).decode("utf-8")
-
     filename = os.path.basename(psd_path)
 
+    # 6) R2에 업로드
+    job_id = job.get("id", uuid.uuid4().hex[:8])
+    r2_prefix = f"jobs/{job_id}"
+
+    try:
+        psd_url = upload_to_r2(psd_path, f"{r2_prefix}/{filename}")
+    except Exception as e:
+        return {"error": f"R2 upload failed: {str(e)}"}
+
     response = {
-        "psd_base64": psd_b64,
+        "psd_url": psd_url,
         "filename": filename,
     }
 
     # 7) 분할 이미지 zip (옵션)
     if include_layers:
-        # PSD와 동일한 이름의 폴더 찾기
-        psd_stem = os.path.splitext(psd_path)[0]  # 확장자 제거한 경로
-        layers_dir = psd_stem  # 동일 이름 폴더
+        psd_stem = os.path.splitext(psd_path)[0]
+        layers_dir = psd_stem
 
         if os.path.isdir(layers_dir):
-            zip_path = f"/tmp/{os.path.basename(layers_dir)}_layers"
-            shutil.make_archive(zip_path, "zip", layers_dir)
-            zip_path = zip_path + ".zip"
+            zip_base = f"/tmp/{os.path.basename(layers_dir)}_layers"
+            shutil.make_archive(zip_base, "zip", layers_dir)
+            zip_path = zip_base + ".zip"
+            zip_filename = os.path.basename(zip_path)
 
-            with open(zip_path, "rb") as f:
-                zip_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-            response["layers_zip_base64"] = zip_b64
-            response["layers_zip_filename"] = os.path.basename(zip_path)
+            try:
+                zip_url = upload_to_r2(zip_path, f"{r2_prefix}/{zip_filename}")
+                response["layers_zip_url"] = zip_url
+                response["layers_zip_filename"] = zip_filename
+            except Exception as e:
+                response["layers_zip_error"] = f"R2 upload failed: {str(e)}"
 
             os.remove(zip_path)
         else:
@@ -127,6 +176,8 @@ if mode_to_run == "pod":
     # --- Pod 모드: 로컬 테스트 ---
     print("Running in Pod mode (local test)")
     print(f"HF_HOME: {os.environ.get('HF_HOME', 'not set')}")
+    print(f"R2_BUCKET: {R2_BUCKET_NAME}")
+    print(f"R2_PUBLIC_URL: {R2_PUBLIC_URL}")
 
     test_image = os.path.join(SEETHROUGH_DIR, "assets/test_image.png")
     if not os.path.exists(test_image):
@@ -136,19 +187,14 @@ if mode_to_run == "pod":
     with open(test_image, "rb") as f:
         img_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-    fake_job = {"input": {"image_base64": img_b64, "include_layers": True}}
+    fake_job = {"id": "test-001", "input": {"image_base64": img_b64, "include_layers": True}}
     result = handler(fake_job)
-
-    display = dict(result)
-    if "psd_base64" in display:
-        display["psd_base64"] = display["psd_base64"][:100] + "...(truncated)"
-    if "layers_zip_base64" in display:
-        display["layers_zip_base64"] = display["layers_zip_base64"][:100] + "...(truncated)"
-    print(json.dumps(display, indent=2, ensure_ascii=False))
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 else:
     # --- Serverless 모드 ---
     import runpod
     print("Running in Serverless mode")
     print(f"HF_HOME: {os.environ.get('HF_HOME', 'not set')}")
+    print(f"R2_BUCKET: {R2_BUCKET_NAME}")
     runpod.serverless.start({"handler": handler})
