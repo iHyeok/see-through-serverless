@@ -22,6 +22,9 @@ RUN ln -sf common/assets assets
 # 의존성 설치
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 의존성 설치 후, 아래 줄 추가
+RUN sed -i "s/add_argument('--resolution', default=1280/add_argument('--resolution', type=int, default=1280/" inference/scripts/inference_psd.py
+
 # RunPod SDK
 RUN pip install --no-cache-dir runpod
 
